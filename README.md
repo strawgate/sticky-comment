@@ -1,6 +1,6 @@
 # Sticky PR Comment
 
-A GitHub Action that maintains a single sticky comment per PR with independently-updatable sections from multiple jobs or workflows.
+A GitHub Action that maintains a single sticky comment per PR with independently-updatable sections from multiple jobs or workflows. Zero dependencies.
 
 Each section carries a status badge and optional body. The action merges all sections into one comment, re-rendering on every update.
 
