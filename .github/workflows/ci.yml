@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check:
+    name: Build, lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check
+      - run: npm test
+
+  e2e:
+    name: E2E test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Init: create sticky comment"
+        uses: ./
+        with:
+          mode: init
+          header: "E2E Test Results"
+          style: summary
+
+      - name: "Update: success section"
+        uses: ./
+        with:
+          section: lint
+          title: Lint
+          status: success
+          body: All lint checks passed.
+
+      - name: "Update: failure section (should auto-expand)"
+        uses: ./
+        with:
+          section: test
+          title: Tests
+          status: failure
+          body: |
+            ```
+            FAIL __tests__/example.test.ts
+              × should work (2ms)
+            ```
+
+      - name: "Update: pending section"
+        uses: ./
+        with:
+          section: build
+          title: Build
+          status: pending
+          body: Build is running...
+
+      - name: "Update: resolve pending → success"
+        uses: ./
+        with:
+          section: build
+          title: Build
+          status: success
+          body: Build completed in 42s.

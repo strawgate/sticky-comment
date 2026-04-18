@@ -1,0 +1,26 @@
+{
+  "name": "sticky-comment",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GitHub Action: sticky PR comment with independently-updatable sections",
+  "main": "lib/main.js",
+  "scripts": {
+    "build": "tsc",
+    "package": "ncc build lib/main.js -o dist --source-map --license licenses.txt",
+    "check": "biome check .",
+    "fix": "biome check --write .",
+    "test": "vitest run",
+    "all": "npm run build && npm run check && npm run package && npm test"
+  },
+  "dependencies": {
+    "@actions/core": "^1.11.1",
+    "@actions/github": "^6.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "@types/node": "^20.17.0",
+    "@vercel/ncc": "^0.38.3",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  }
+}
