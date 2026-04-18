@@ -7,15 +7,20 @@ require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MAX_RETRIES = exports.MAX_COMMENT_LENGTH = void 0;
 exports.run = run;
 const render_1 = __nccwpck_require__(7746);
 const state_1 = __nccwpck_require__(8578);
-const MAX_COMMENT_LENGTH = 65536;
-async function run(inputs, api) {
-    const marker = `<!-- sticky:${inputs.commentId} -->`;
-    // Find existing comment
-    const existing = await api.findByMarker(marker);
-    // Build / restore state
+exports.MAX_COMMENT_LENGTH = 65536;
+exports.MAX_RETRIES = 3;
+const RETRY_MIN_MS = 1000;
+const RETRY_MAX_MS = 5000;
+function randomDelay() {
+    const ms = RETRY_MIN_MS + Math.random() * (RETRY_MAX_MS - RETRY_MIN_MS);
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+/** Build state from an existing comment (or blank) and apply inputs. */
+function buildState(existing, inputs) {
     const blank = {
         header: inputs.header || "",
         style: inputs.style,
@@ -34,32 +39,87 @@ async function run(inputs, api) {
     else {
         state = blank;
     }
-    // Upsert section
+    // Upsert section — only overwrite if our timestamp is newer
     if (inputs.section) {
         if (!state.order.includes(inputs.section)) {
             state.order.push(inputs.section);
         }
         const prev = state.sections[inputs.section];
-        state.sections[inputs.section] = {
-            title: inputs.title || prev?.title || inputs.section,
-            status: inputs.status || prev?.status || "",
-            body: inputs.body !== "" ? inputs.body : prev?.body || "",
-        };
+        const now = inputs.timestamp ?? Date.now();
+        if (!prev?.updatedAt || now >= prev.updatedAt) {
+            state.sections[inputs.section] = {
+                title: inputs.title || prev?.title || inputs.section,
+                status: inputs.status || prev?.status || "",
+                body: inputs.body !== "" ? inputs.body : prev?.body || "",
+                updatedAt: now,
+            };
+        }
     }
     else if (inputs.mode === "update") {
-        // update mode with no section — nothing to change
-        return existing ?? null;
+        return null; // nothing to change
     }
-    // Render
-    let rendered = (0, render_1.render)(inputs.commentId, state);
-    if (rendered.length > MAX_COMMENT_LENGTH) {
-        rendered = `${rendered.slice(0, MAX_COMMENT_LENGTH - 60)}\n\n---\n*Comment truncated.*\n`;
+    return state;
+}
+function renderBody(id, state) {
+    let rendered = (0, render_1.render)(id, state);
+    if (rendered.length > exports.MAX_COMMENT_LENGTH) {
+        rendered = `${rendered.slice(0, exports.MAX_COMMENT_LENGTH - 60)}\n\n---\n*Comment truncated.*\n`;
     }
-    // Create or update
-    if (existing) {
-        return api.update(existing.id, rendered);
+    return rendered;
+}
+/** Check whether our section survived in the comment after writing. */
+function verifyWrite(comment, inputs) {
+    if (!inputs.section)
+        return true;
+    const state = (0, state_1.parseState)(comment.body, inputs.commentId);
+    if (!state?.sections[inputs.section])
+        return false;
+    const s = state.sections[inputs.section];
+    const ts = inputs.timestamp ?? 0;
+    // Our timestamp must match — if someone newer overwrote us, that's correct and we stop retrying
+    if (ts && s.updatedAt && s.updatedAt > ts)
+        return true; // newer update is fine
+    if (ts && s.updatedAt && s.updatedAt < ts)
+        return false; // our write was lost
+    // Check our values are present
+    if (inputs.status && s.status !== inputs.status)
+        return false;
+    if (inputs.body && s.body !== inputs.body)
+        return false;
+    return true;
+}
+async function run(inputs, api) {
+    const marker = `<!-- sticky:${inputs.commentId} -->`;
+    for (let attempt = 0; attempt <= exports.MAX_RETRIES; attempt++) {
+        // Read current state
+        const existing = await api.findByMarker(marker);
+        // Build new state
+        const state = buildState(existing, inputs);
+        if (state === null)
+            return existing ?? null;
+        // Write
+        const rendered = renderBody(inputs.commentId, state);
+        let result;
+        if (existing) {
+            result = await api.update(existing.id, rendered);
+        }
+        else {
+            result = await api.create(rendered);
+        }
+        // Verify our write stuck (skip verification if truncated or on last attempt)
+        const wasTruncated = rendered.includes("*Comment truncated.*");
+        if (attempt < exports.MAX_RETRIES && inputs.section && !wasTruncated) {
+            const verified = await api.findByMarker(marker);
+            if (verified && verifyWrite(verified, inputs)) {
+                return result;
+            }
+            // Lost the race — sleep random 1-5s and retry
+            await randomDelay();
+            continue;
+        }
+        return result;
     }
-    return api.create(rendered);
+    return null; // unreachable, but satisfies the type checker
 }
 //# sourceMappingURL=action.js.map
 
@@ -178,6 +238,7 @@ async function main() {
         title: core.getInput("title") || section,
         status: core.getInput("status"),
         body,
+        timestamp: Date.now(),
     };
     const result = await (0, action_1.run)(inputs, api);
     if (result) {
@@ -212,6 +273,7 @@ exports.STATUS_MAP = {
     warning: { emoji: "\u26A0\uFE0F", label: "Warning" },
     skipped: { emoji: "\u23ED\uFE0F", label: "Skipped" },
     cancelled: { emoji: "\uD83D\uDEAB", label: "Cancelled" },
+    info: { emoji: "\u2139\uFE0F", label: "Info" },
 };
 function statusStr(key) {
     const s = exports.STATUS_MAP[key];
@@ -234,8 +296,8 @@ function render(id, state) {
         out.push("*Waiting for results\u2026*");
         return out.join("\n");
     }
-    // Status table (summary & status-only styles)
-    if (state.style !== "full") {
+    // Status table (status-only style)
+    if (state.style === "status-only") {
         out.push("| Check | Status |");
         out.push("|-------|--------|");
         for (const s of sections) {

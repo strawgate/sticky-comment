@@ -1,0 +1,129 @@
+name: Stress Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue-number:
+        description: "PR or issue number to post the stress test comment on"
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  # ── Phase 1: Init the comment ───────────────────────────────────
+  init:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./
+        with:
+          comment-id: stress-test
+          issue-number: ${{ inputs.issue-number }}
+          mode: init
+          header: "Stress Test — 20 Concurrent Writers"
+          style: status-only
+
+  # ── Phase 2: 20 parallel writers hitting the same comment ──────
+  writer:
+    needs: init
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+      max-parallel: 20
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write section
+        uses: ./
+        with:
+          comment-id: stress-test
+          issue-number: ${{ inputs.issue-number }}
+          section: writer-${{ matrix.id }}
+          title: "Writer ${{ matrix.id }}"
+          status: success
+          body: |
+            Written by matrix job ${{ matrix.id }}
+            Run: ${{ github.run_id }}
+
+  # ── Phase 3: Audit — verify all 20 sections survived ──────────
+  audit:
+    needs: writer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch comment and audit sections
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          PR=${{ inputs.issue-number }}
+          REPO=${{ github.repository }}
+          MARKER="<!-- sticky:stress-test -->"
+          EXPECTED=20
+
+          echo "::group::Fetching comments from PR #${PR}"
+          COMMENT_BODY=$(gh api "repos/${REPO}/issues/${PR}/comments" \
+            --paginate --jq ".[] | select(.body | contains(\"${MARKER}\")) | .body")
+
+          if [ -z "$COMMENT_BODY" ]; then
+            echo "::error::Sticky comment not found!"
+            exit 1
+          fi
+          echo "::endgroup::"
+
+          # Extract the base64 state blob
+          STATE_B64=$(echo "$COMMENT_BODY" | grep -oP '<!-- sticky:stress-test:state:\K[A-Za-z0-9+/=]+(?= -->)')
+          if [ -z "$STATE_B64" ]; then
+            echo "::error::Could not extract state from comment"
+            echo "$COMMENT_BODY"
+            exit 1
+          fi
+
+          # Decode and pretty-print state
+          STATE_JSON=$(echo "$STATE_B64" | base64 -d)
+          echo "::group::Decoded state"
+          echo "$STATE_JSON" | jq .
+          echo "::endgroup::"
+
+          # Count sections
+          SECTION_COUNT=$(echo "$STATE_JSON" | jq '.order | length')
+          SECTIONS=$(echo "$STATE_JSON" | jq -r '.order[]')
+
+          echo ""
+          echo "=== AUDIT RESULTS ==="
+          echo "Expected sections: ${EXPECTED}"
+          echo "Found sections:    ${SECTION_COUNT}"
+          echo ""
+
+          # Check each expected writer
+          MISSING=0
+          FOUND=0
+          for i in $(seq 1 $EXPECTED); do
+            KEY="writer-${i}"
+            if echo "$STATE_JSON" | jq -e ".sections[\"${KEY}\"]" > /dev/null 2>&1; then
+              FOUND=$((FOUND + 1))
+            else
+              echo "  ❌ ${KEY} — MISSING"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+
+          echo "  ✅ ${FOUND} sections present"
+          if [ "$MISSING" -gt 0 ]; then
+            echo "  ❌ ${MISSING} sections missing"
+          fi
+
+          echo ""
+          if [ "$MISSING" -gt 0 ]; then
+            echo "::error::DATA LOSS: ${MISSING} of ${EXPECTED} sections missing!"
+            echo ""
+            echo "Present sections: $(echo "$SECTIONS" | tr '\n' ' ')"
+            exit 1
+          else
+            echo "✅ All ${EXPECTED} sections present — no data loss."
+          fi

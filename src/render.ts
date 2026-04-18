@@ -7,6 +7,7 @@ export const STATUS_MAP: Record<string, { emoji: string; label: string }> = {
   warning: { emoji: "\u26A0\uFE0F", label: "Warning" },
   skipped: { emoji: "\u23ED\uFE0F", label: "Skipped" },
   cancelled: { emoji: "\uD83D\uDEAB", label: "Cancelled" },
+  info: { emoji: "\u2139\uFE0F", label: "Info" },
 };
 
 function statusStr(key: string): string {
@@ -36,8 +37,8 @@ export function render(id: string, state: State): string {
     return out.join("\n");
   }
 
-  // Status table (summary & status-only styles)
-  if (state.style !== "full") {
+  // Status table (status-only style)
+  if (state.style === "status-only") {
     out.push("| Check | Status |");
     out.push("|-------|--------|");
     for (const s of sections) {

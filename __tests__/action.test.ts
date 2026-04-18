@@ -16,19 +16,23 @@ function defaultInputs(overrides: Partial<Inputs> = {}): Inputs {
   };
 }
 
-function mockApi(existing: { id: number; body: string; url: string } | null = null): CommentApi {
+/**
+ * Stateful mock: tracks the last written body so that verification
+ * reads after a write return the updated content.
+ */
+function mockApi(initial: { id: number; body: string; url: string } | null = null): CommentApi {
+  let current = initial ? { ...initial } : null;
+
   return {
-    findByMarker: vi.fn().mockResolvedValue(existing),
-    create: vi.fn().mockImplementation(async (body: string) => ({
-      id: 1,
-      body,
-      url: "https://github.com/test/1",
-    })),
-    update: vi.fn().mockImplementation(async (id: number, body: string) => ({
-      id,
-      body,
-      url: `https://github.com/test/${id}`,
-    })),
+    findByMarker: vi.fn().mockImplementation(async () => (current ? { ...current } : null)),
+    create: vi.fn().mockImplementation(async (body: string) => {
+      current = { id: 1, body, url: "https://github.com/test/1" };
+      return { ...current };
+    }),
+    update: vi.fn().mockImplementation(async (id: number, body: string) => {
+      current = { id, body, url: `https://github.com/test/${id}` };
+      return { ...current };
+    }),
   };
 }
 
@@ -189,6 +193,202 @@ describe("run", () => {
       expect(updatedBody).toContain("## New Header");
       // status-only: no details blocks
       expect(updatedBody).not.toContain("<details");
+    });
+  });
+
+  describe("conflict retry", () => {
+    it("retries when another writer overwrites our update", async () => {
+      // Start with lint section
+      const initialState: State = {
+        header: "",
+        style: "summary",
+        sections: { lint: { title: "Lint", status: "success", body: "ok" } },
+        order: ["lint"],
+      };
+
+      // Simulate conflict: after our write, another job overwrites with
+      // a different state (their build section, but our test section is gone).
+      const conflictState: State = {
+        header: "",
+        style: "summary",
+        sections: {
+          lint: { title: "Lint", status: "success", body: "ok" },
+          build: { title: "Build", status: "success", body: "built" },
+        },
+        order: ["lint", "build"],
+      };
+      const conflictBody = `<!-- sticky:test -->\n<!-- sticky:test:state:${encodeState(conflictState)} -->`;
+
+      let writeCount = 0;
+      const api: CommentApi = {
+        findByMarker: vi.fn().mockImplementation(async () => {
+          if (writeCount === 0) {
+            // First read: initial state
+            return makeExisting(initialState);
+          }
+          if (writeCount === 1) {
+            // Verification read after first write: someone else overwrote us
+            return { id: 42, body: conflictBody, url: "https://github.com/test/42" };
+          }
+          // Second read (retry): still the conflict state (our section missing)
+          // After second write: return what we wrote
+          return {
+            id: 42,
+            body: (api.update as Mock).mock.lastCall?.[1] ?? conflictBody,
+            url: "https://github.com/test/42",
+          };
+        }),
+        create: vi.fn(),
+        update: vi.fn().mockImplementation(async (id: number, body: string) => {
+          writeCount++;
+          return { id, body, url: `https://github.com/test/${id}` };
+        }),
+      };
+
+      const inputs = defaultInputs({
+        section: "test",
+        title: "Tests",
+        status: "failure",
+        body: "3 failed",
+      });
+
+      const result = await run(inputs, api);
+
+      // Should have retried: 2 update calls
+      expect(api.update).toHaveBeenCalledTimes(2);
+
+      // Final result should contain BOTH the conflict's build section AND our test section
+      const finalState = parseState(result?.body ?? "", "test");
+      expect(finalState?.sections.build).toBeTruthy();
+      expect(finalState?.sections.test?.body).toBe("3 failed");
+      expect(finalState?.order).toContain("build");
+      expect(finalState?.order).toContain("test");
+    }, 15000);
+
+    it("succeeds on first try when no conflict", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: { lint: { title: "Lint", status: "success", body: "ok" } },
+        order: ["lint"],
+      };
+      const api = mockApi(makeExisting(state));
+      const inputs = defaultInputs({
+        section: "test",
+        title: "Tests",
+        status: "success",
+        body: "all pass",
+      });
+
+      await run(inputs, api);
+
+      // findByMarker: 1 initial read + 1 verification = 2 calls, no retry
+      expect(api.findByMarker).toHaveBeenCalledTimes(2);
+      expect(api.update).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("timestamp ordering", () => {
+    it("does not overwrite a section with a newer timestamp", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: {
+          build: { title: "Build", status: "success", body: "done", updatedAt: 2000 },
+        },
+        order: ["build"],
+      };
+      const api = mockApi(makeExisting(state));
+      // Our update has an OLDER timestamp
+      const inputs = defaultInputs({
+        section: "build",
+        title: "Build",
+        status: "pending",
+        body: "starting...",
+        timestamp: 1000,
+      });
+
+      await run(inputs, api);
+
+      const parsed = parseState((api.update as Mock).mock.calls[0][1] as string, "test");
+      // The newer "success" should be preserved, not overwritten by stale "pending"
+      expect(parsed?.sections.build.status).toBe("success");
+      expect(parsed?.sections.build.body).toBe("done");
+      expect(parsed?.sections.build.updatedAt).toBe(2000);
+    });
+
+    it("overwrites a section with an older timestamp", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: {
+          build: { title: "Build", status: "pending", body: "running", updatedAt: 1000 },
+        },
+        order: ["build"],
+      };
+      const api = mockApi(makeExisting(state));
+      const inputs = defaultInputs({
+        section: "build",
+        title: "Build",
+        status: "success",
+        body: "done!",
+        timestamp: 2000,
+      });
+
+      await run(inputs, api);
+
+      const parsed = parseState((api.update as Mock).mock.calls[0][1] as string, "test");
+      expect(parsed?.sections.build.status).toBe("success");
+      expect(parsed?.sections.build.body).toBe("done!");
+      expect(parsed?.sections.build.updatedAt).toBe(2000);
+    });
+
+    it("stops retrying when a newer writer overwrote our section", async () => {
+      // Existing state has no build section
+      const initialState: State = {
+        header: "",
+        style: "summary",
+        sections: {},
+        order: [],
+      };
+
+      // After our write, a NEWER writer overwrote with their own build status
+      const newerState: State = {
+        header: "",
+        style: "summary",
+        sections: {
+          build: { title: "Build", status: "success", body: "from newer", updatedAt: 3000 },
+        },
+        order: ["build"],
+      };
+      const newerBody = `<!-- sticky:test -->\n<!-- sticky:test:state:${encodeState(newerState)} -->`;
+
+      let writeCount = 0;
+      const api: CommentApi = {
+        findByMarker: vi.fn().mockImplementation(async () => {
+          if (writeCount === 0) return makeExisting(initialState);
+          // Verification: newer writer overwrote us
+          return { id: 42, body: newerBody, url: "https://github.com/test/42" };
+        }),
+        create: vi.fn(),
+        update: vi.fn().mockImplementation(async (id: number, body: string) => {
+          writeCount++;
+          return { id, body, url: `https://github.com/test/${id}` };
+        }),
+      };
+
+      const inputs = defaultInputs({
+        section: "build",
+        title: "Build",
+        status: "pending",
+        body: "starting",
+        timestamp: 1000, // older than the newer writer's 3000
+      });
+
+      await run(inputs, api);
+
+      // Should NOT retry — the newer write is correct, accept it
+      expect(api.update).toHaveBeenCalledTimes(1);
     });
   });
 

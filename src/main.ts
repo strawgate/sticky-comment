@@ -85,6 +85,7 @@ async function main(): Promise<void> {
     title: core.getInput("title") || section,
     status: core.getInput("status"),
     body,
+    timestamp: Date.now(),
   };
 
   const result = await run(inputs, api);

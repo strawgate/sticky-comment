@@ -4,6 +4,8 @@ export interface SectionData {
   title: string;
   status: string;
   body: string;
+  /** Unix timestamp (ms) of the most recent update. Used to resolve conflicts. */
+  updatedAt?: number;
 }
 
 export interface State {
