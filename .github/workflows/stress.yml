@@ -1,11 +1,17 @@
 name: Stress Test
 
 on:
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      issue-number:
+        description: "PR or issue number to post the stress test comment on"
+        required: true
+        type: number
 
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 jobs:
   # ── Phase 1: Init the comment ───────────────────────────────────
@@ -16,6 +22,7 @@ jobs:
       - uses: ./
         with:
           comment-id: stress-test
+          issue-number: ${{ inputs.issue-number }}
           mode: init
           header: "Stress Test — 100 Concurrent Writers"
           style: status-only
@@ -46,6 +53,7 @@ jobs:
         uses: ./
         with:
           comment-id: stress-test
+          issue-number: ${{ inputs.issue-number }}
           section: writer-${{ matrix.id }}
           title: "Writer ${{ matrix.id }}"
           status: success
@@ -64,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          PR=${{ github.event.pull_request.number }}
+          PR=${{ inputs.issue-number }}
           REPO=${{ github.repository }}
           MARKER="<!-- sticky:stress-test -->"
           EXPECTED=100
