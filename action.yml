@@ -1,0 +1,56 @@
+name: Sticky PR Comment
+description: >
+  Single sticky comment per PR with independently-updatable sections from
+  different jobs or workflows. Each section carries a status badge and
+  optional collapsible body. Two modes: 'init' creates the comment upfront
+  with explicit config; 'update' (default) upserts a section and auto-creates
+  the comment on first use.
+
+inputs:
+  token:
+    description: GitHub token for API access
+    default: ${{ github.token }}
+  mode:
+    description: "'init' to create/configure the comment, 'update' to upsert a section"
+    default: update
+  comment-id:
+    description: Logical name for the sticky comment (allows multiple per PR)
+    default: sticky-comment
+  issue-number:
+    description: PR or issue number (auto-detected from event context if omitted)
+    required: false
+
+  # Comment-level config (init mode, or defaults on auto-create)
+  header:
+    description: Markdown heading shown at the top of the comment
+    default: ""
+  style:
+    description: "Rendering style: 'summary' (table + collapsed details), 'full' (expanded), 'status-only' (table only)"
+    default: summary
+
+  # Section-level (update mode)
+  section:
+    description: Section identifier (required for update mode)
+    required: false
+  title:
+    description: Display title for the section (defaults to section id)
+    required: false
+  status:
+    description: "Section status: success, failure, pending, warning, skipped, cancelled"
+    default: ""
+  body:
+    description: Section body content (markdown)
+    default: ""
+  body-path:
+    description: Read section body from this file instead of body input
+    required: false
+
+outputs:
+  comment-id:
+    description: Numeric GitHub comment ID
+  comment-url:
+    description: HTML URL of the comment
+
+runs:
+  using: node20
+  main: index.js
