@@ -17,17 +17,28 @@ jobs:
         with:
           comment-id: stress-test
           mode: init
-          header: "Stress Test — Concurrent Writers"
-          style: summary
+          header: "Stress Test — 100 Concurrent Writers"
+          style: status-only
 
-  # ── Phase 2: 10 parallel writers hitting the same comment ──────
+  # ── Phase 2: 100 parallel writers hitting the same comment ─────
   writer:
     needs: init
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-      max-parallel: 10
+        id: [
+           1,  2,  3,  4,  5,  6,  7,  8,  9, 10,
+          11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+          21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
+          31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+          41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+          51, 52, 53, 54, 55, 56, 57, 58, 59, 60,
+          61, 62, 63, 64, 65, 66, 67, 68, 69, 70,
+          71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
+          81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
+          91, 92, 93, 94, 95, 96, 97, 98, 99, 100
+        ]
+      max-parallel: 100
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -41,9 +52,8 @@ jobs:
           body: |
             Written by matrix job ${{ matrix.id }}
             Run: ${{ github.run_id }}
-            Timestamp: ${{ github.event.pull_request.updated_at }}
 
-  # ── Phase 3: Audit — verify all 10 sections survived ──────────
+  # ── Phase 3: Audit — verify all 100 sections survived ─────────
   audit:
     needs: writer
     runs-on: ubuntu-latest
@@ -57,7 +67,7 @@ jobs:
           PR=${{ github.event.pull_request.number }}
           REPO=${{ github.repository }}
           MARKER="<!-- sticky:stress-test -->"
-          EXPECTED=10
+          EXPECTED=100
 
           echo "::group::Fetching comments from PR #${PR}"
           COMMENT_BODY=$(gh api "repos/${REPO}/issues/${PR}/comments" \
@@ -95,16 +105,21 @@ jobs:
 
           # Check each expected writer
           MISSING=0
+          FOUND=0
           for i in $(seq 1 $EXPECTED); do
             KEY="writer-${i}"
             if echo "$STATE_JSON" | jq -e ".sections[\"${KEY}\"]" > /dev/null 2>&1; then
-              STATUS=$(echo "$STATE_JSON" | jq -r ".sections[\"${KEY}\"].status")
-              echo "  ✅ ${KEY} — status: ${STATUS}"
+              FOUND=$((FOUND + 1))
             else
               echo "  ❌ ${KEY} — MISSING"
               MISSING=$((MISSING + 1))
             fi
           done
+
+          echo "  ✅ ${FOUND} sections present"
+          if [ "$MISSING" -gt 0 ]; then
+            echo "  ❌ ${MISSING} sections missing"
+          fi
 
           echo ""
           if [ "$MISSING" -gt 0 ]; then
@@ -114,10 +129,4 @@ jobs:
             exit 1
           else
             echo "✅ All ${EXPECTED} sections present — no data loss."
-          fi
-
-          # Check section order contains all writers
-          ORDER_COUNT=$(echo "$STATE_JSON" | jq '.order | length')
-          if [ "$ORDER_COUNT" -ne "$EXPECTED" ]; then
-            echo "::warning::Order array has ${ORDER_COUNT} entries (expected ${EXPECTED})"
           fi
