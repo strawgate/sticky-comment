@@ -25,7 +25,7 @@ inputs:
     description: Markdown heading shown at the top of the comment
     default: ""
   style:
-    description: "Rendering style: 'summary' (table + collapsed details), 'full' (expanded), 'status-only' (table only)"
+    description: "Rendering style: 'summary' (collapsed details), 'full' (expanded), 'status-only' (table only)"
     default: summary
 
   # Section-level (update mode)
@@ -36,7 +36,7 @@ inputs:
     description: Display title for the section (defaults to section id)
     required: false
   status:
-    description: "Section status: success, failure, pending, warning, skipped, cancelled"
+    description: "Section status: success, failure, pending, warning, skipped, cancelled, info"
     default: ""
   body:
     description: Section body content (markdown)

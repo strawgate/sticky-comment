@@ -31,45 +31,177 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: "Init: create sticky comment"
+      # ── Feature: init mode with header ──────────────────────────
+      - name: "Init: create comment with header"
         uses: ./
         with:
           mode: init
-          header: "E2E Test Results"
+          header: "CI Status"
           style: summary
 
-      - name: "Update: success section"
+      # ── Feature: all status types ──────────────────────────────
+      - name: "Status: success"
         uses: ./
         with:
           section: lint
-          title: Lint
+          title: Lint & Format
           status: success
-          body: All lint checks passed.
+          body: |
+            All checks passed.
+            ```
+            Checked 11 files in 5ms. No fixes applied.
+            ```
 
-      - name: "Update: failure section (should auto-expand)"
+      - name: "Status: failure (auto-expands)"
         uses: ./
         with:
           section: test
-          title: Tests
+          title: Unit Tests
           status: failure
           body: |
+            **3 of 35 tests failed:**
             ```
             FAIL __tests__/example.test.ts
-              × should work (2ms)
+              × should handle edge case (2ms)
+              × should validate input (1ms)
+
+            FAIL __tests__/other.test.ts
+              × should not crash (3ms)
             ```
 
-      - name: "Update: pending section"
+      - name: "Status: warning"
         uses: ./
         with:
-          section: build
-          title: Build
-          status: pending
-          body: Build is running...
+          section: deprecations
+          title: Deprecation Warnings
+          status: warning
+          body: |
+            - `oldMethod()` is deprecated, use `newMethod()` instead
+            - Node.js 18 support will be removed in v3
 
+      - name: "Status: pending"
+        uses: ./
+        with:
+          section: deploy
+          title: Deploy Preview
+          status: pending
+          body: Deploying to staging...
+
+      - name: "Status: info"
+        uses: ./
+        with:
+          section: coverage
+          title: Coverage Report
+          status: info
+          body: |
+            | File | Lines | Branches |
+            |------|-------|----------|
+            | state.ts | 100% | 100% |
+            | render.ts | 95% | 90% |
+            | action.ts | 88% | 85% |
+
+      - name: "Status: skipped"
+        uses: ./
+        with:
+          section: e2e-tests
+          title: E2E Tests
+          status: skipped
+          body: Skipped — no UI changes detected.
+
+      - name: "Status: cancelled"
+        uses: ./
+        with:
+          section: perf
+          title: Perf Benchmarks
+          status: cancelled
+          body: Cancelled by user.
+
+      # ── Feature: section with no body ───────────────────────────
+      - name: "No body"
+        uses: ./
+        with:
+          section: typecheck
+          title: Type Check
+          status: success
+
+      # ── Feature: section with no status ─────────────────────────
+      - name: "No status"
+        uses: ./
+        with:
+          section: notes
+          title: Release Notes
+          body: |
+            ## What's new
+            - Added `info` status type
+            - Removed table from summary style
+            - Sections now render as collapsible details only
+
+      # ── Feature: update existing section (pending → success) ────
       - name: "Update: resolve pending → success"
         uses: ./
         with:
+          section: deploy
+          title: Deploy Preview
+          status: success
+          body: |
+            Deployed to https://preview-abc123.example.com
+            Build time: 42s
+
+      # ── Feature: second sticky comment (different comment-id) ───
+      - name: "Second comment: status-only style"
+        uses: ./
+        with:
+          comment-id: status-table
+          mode: init
+          header: "Quick Status (status-only style)"
+          style: status-only
+
+      - name: "Second comment: add sections"
+        uses: ./
+        with:
+          comment-id: status-table
           section: build
           title: Build
           status: success
-          body: Build completed in 42s.
+
+      - name: "Second comment: add more"
+        uses: ./
+        with:
+          comment-id: status-table
+          section: test
+          title: Test
+          status: failure
+
+      - name: "Second comment: and more"
+        uses: ./
+        with:
+          comment-id: status-table
+          section: lint
+          title: Lint
+          status: success
+
+      # ── Feature: third sticky comment (full style) ──────────────
+      - name: "Third comment: full (expanded) style"
+        uses: ./
+        with:
+          comment-id: full-style
+          header: "Full Style Demo"
+          style: full
+          section: summary
+          title: Build Summary
+          status: success
+          body: |
+            Everything built cleanly.
+            - Binary size: 14.8 MB
+            - Compile time: 1m 23s
+
+      - name: "Third comment: add another section"
+        uses: ./
+        with:
+          comment-id: full-style
+          section: changelog
+          title: Changelog
+          status: info
+          body: |
+            - feat: added sticky comment action
+            - fix: resolved race condition in state codec

@@ -33,11 +33,9 @@ describe("render", () => {
       order: ["lint", "test"],
     });
 
-    it("renders status table", () => {
+    it("does not render status table", () => {
       const output = render("id", state);
-      expect(output).toContain("| Check | Status |");
-      expect(output).toContain("| Lint |");
-      expect(output).toContain("| Tests |");
+      expect(output).not.toContain("| Check | Status |");
     });
 
     it("renders collapsed details blocks", () => {
@@ -100,13 +98,25 @@ describe("render", () => {
     });
   });
 
-  it("shows dash for empty status", () => {
+  it("shows dash for empty status in status-only table", () => {
     const state = makeState({
+      style: "status-only",
       sections: { x: { title: "X", status: "", body: "" } },
       order: ["x"],
     });
     const output = render("id", state);
     expect(output).toContain("| X | \u2014 |");
+  });
+
+  it("renders info status", () => {
+    const state = makeState({
+      sections: { x: { title: "Notes", status: "info", body: "Some info" } },
+      order: ["x"],
+    });
+    const output = render("id", state);
+    expect(output).toContain("\u2139\uFE0F");
+    expect(output).toContain("Info");
+    expect(output).toContain("Some info");
   });
 
   it("shows 'No output.' for empty body", () => {
@@ -121,14 +131,14 @@ describe("render", () => {
   it("skips sections not in order array", () => {
     const state = makeState({
       sections: {
-        a: { title: "A", status: "success", body: "a" },
-        b: { title: "B", status: "success", body: "b" },
+        a: { title: "A", status: "success", body: "content-a" },
+        b: { title: "B", status: "success", body: "content-b" },
       },
       order: ["a"],
     });
     const output = render("id", state);
-    expect(output).toContain("| A |");
-    expect(output).not.toContain("| B |");
+    expect(output).toContain("content-a");
+    expect(output).not.toContain("content-b");
   });
 
   it("roundtrips state through render + parse", () => {
