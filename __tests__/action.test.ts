@@ -16,19 +16,23 @@ function defaultInputs(overrides: Partial<Inputs> = {}): Inputs {
   };
 }
 
-function mockApi(existing: { id: number; body: string; url: string } | null = null): CommentApi {
+/**
+ * Stateful mock: tracks the last written body so that verification
+ * reads after a write return the updated content.
+ */
+function mockApi(initial: { id: number; body: string; url: string } | null = null): CommentApi {
+  let current = initial ? { ...initial } : null;
+
   return {
-    findByMarker: vi.fn().mockResolvedValue(existing),
-    create: vi.fn().mockImplementation(async (body: string) => ({
-      id: 1,
-      body,
-      url: "https://github.com/test/1",
-    })),
-    update: vi.fn().mockImplementation(async (id: number, body: string) => ({
-      id,
-      body,
-      url: `https://github.com/test/${id}`,
-    })),
+    findByMarker: vi.fn().mockImplementation(async () => (current ? { ...current } : null)),
+    create: vi.fn().mockImplementation(async (body: string) => {
+      current = { id: 1, body, url: "https://github.com/test/1" };
+      return { ...current };
+    }),
+    update: vi.fn().mockImplementation(async (id: number, body: string) => {
+      current = { id, body, url: `https://github.com/test/${id}` };
+      return { ...current };
+    }),
   };
 }
 
@@ -189,6 +193,98 @@ describe("run", () => {
       expect(updatedBody).toContain("## New Header");
       // status-only: no details blocks
       expect(updatedBody).not.toContain("<details");
+    });
+  });
+
+  describe("conflict retry", () => {
+    it("retries when another writer overwrites our update", async () => {
+      // Start with lint section
+      const initialState: State = {
+        header: "",
+        style: "summary",
+        sections: { lint: { title: "Lint", status: "success", body: "ok" } },
+        order: ["lint"],
+      };
+
+      // Simulate conflict: after our write, another job overwrites with
+      // a different state (their build section, but our test section is gone).
+      const conflictState: State = {
+        header: "",
+        style: "summary",
+        sections: {
+          lint: { title: "Lint", status: "success", body: "ok" },
+          build: { title: "Build", status: "success", body: "built" },
+        },
+        order: ["lint", "build"],
+      };
+      const conflictBody = `<!-- sticky:test -->\n<!-- sticky:test:state:${encodeState(conflictState)} -->`;
+
+      let writeCount = 0;
+      const api: CommentApi = {
+        findByMarker: vi.fn().mockImplementation(async () => {
+          if (writeCount === 0) {
+            // First read: initial state
+            return makeExisting(initialState);
+          }
+          if (writeCount === 1) {
+            // Verification read after first write: someone else overwrote us
+            return { id: 42, body: conflictBody, url: "https://github.com/test/42" };
+          }
+          // Second read (retry): still the conflict state (our section missing)
+          // After second write: return what we wrote
+          return {
+            id: 42,
+            body: (api.update as Mock).mock.lastCall?.[1] ?? conflictBody,
+            url: "https://github.com/test/42",
+          };
+        }),
+        create: vi.fn(),
+        update: vi.fn().mockImplementation(async (id: number, body: string) => {
+          writeCount++;
+          return { id, body, url: `https://github.com/test/${id}` };
+        }),
+      };
+
+      const inputs = defaultInputs({
+        section: "test",
+        title: "Tests",
+        status: "failure",
+        body: "3 failed",
+      });
+
+      const result = await run(inputs, api);
+
+      // Should have retried: 2 update calls
+      expect(api.update).toHaveBeenCalledTimes(2);
+
+      // Final result should contain BOTH the conflict's build section AND our test section
+      const finalState = parseState(result?.body ?? "", "test");
+      expect(finalState?.sections.build).toBeTruthy();
+      expect(finalState?.sections.test?.body).toBe("3 failed");
+      expect(finalState?.order).toContain("build");
+      expect(finalState?.order).toContain("test");
+    }, 15000);
+
+    it("succeeds on first try when no conflict", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: { lint: { title: "Lint", status: "success", body: "ok" } },
+        order: ["lint"],
+      };
+      const api = mockApi(makeExisting(state));
+      const inputs = defaultInputs({
+        section: "test",
+        title: "Tests",
+        status: "success",
+        body: "all pass",
+      });
+
+      await run(inputs, api);
+
+      // findByMarker: 1 initial read + 1 verification = 2 calls, no retry
+      expect(api.findByMarker).toHaveBeenCalledTimes(2);
+      expect(api.update).toHaveBeenCalledTimes(1);
     });
   });
 
