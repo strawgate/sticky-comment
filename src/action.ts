@@ -27,8 +27,8 @@ export interface Inputs {
   timestamp?: number;
 }
 
-export const MAX_COMMENT_LENGTH = 65536;
-export const MAX_RETRIES = 3;
+const MAX_COMMENT_LENGTH = 65536;
+const MAX_RETRIES = 3;
 const RETRY_MIN_MS = 1000;
 const RETRY_MAX_MS = 5000;
 

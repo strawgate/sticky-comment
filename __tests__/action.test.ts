@@ -392,6 +392,72 @@ describe("run", () => {
     });
   });
 
+  describe("init + section combo", () => {
+    it("init mode with section creates comment with config and section", async () => {
+      const api = mockApi();
+      const inputs = defaultInputs({
+        mode: "init",
+        header: "CI",
+        style: "full",
+        section: "lint",
+        title: "Lint",
+        status: "success",
+        body: "ok",
+      });
+
+      const result = await run(inputs, api);
+
+      expect(result?.body).toContain("## CI");
+      expect(result?.body).toContain("ok");
+      // full style: headings not details
+      expect(result?.body).toContain("### ");
+      expect(result?.body).not.toContain("<details");
+    });
+  });
+
+  describe("corrupted state", () => {
+    it("falls back to blank state when existing comment has corrupted state", async () => {
+      const api = mockApi({
+        id: 42,
+        body: "<!-- sticky:test -->\n<!-- sticky:test:state:TOTALLY_BROKEN!!! -->\ngarbage",
+        url: "https://github.com/test/42",
+      });
+      const inputs = defaultInputs({
+        section: "lint",
+        title: "Lint",
+        status: "success",
+        body: "ok",
+      });
+
+      const result = await run(inputs, api);
+
+      // Should still work — creates fresh state
+      expect(result?.body).toContain("ok");
+      const parsed = parseState(result?.body ?? "", "test");
+      expect(parsed?.sections.lint?.status).toBe("success");
+    });
+
+    it("falls back to blank state when existing comment has no state marker", async () => {
+      const api = mockApi({
+        id: 42,
+        body: "<!-- sticky:test -->\njust some text with no state",
+        url: "https://github.com/test/42",
+      });
+      const inputs = defaultInputs({
+        section: "build",
+        title: "Build",
+        status: "pending",
+        body: "building",
+      });
+
+      const result = await run(inputs, api);
+
+      const parsed = parseState(result?.body ?? "", "test");
+      expect(parsed?.sections.build?.body).toBe("building");
+      expect(parsed?.order).toEqual(["build"]);
+    });
+  });
+
   describe("edge cases", () => {
     it("falls back to section id when title is empty", async () => {
       const api = mockApi();
@@ -422,6 +488,61 @@ describe("run", () => {
       const parsed = parseState((api.update as Mock).mock.calls[0][1] as string, "test");
       expect(parsed?.sections.lint.status).toBe("success");
       expect(parsed?.sections.lint.body).toBe("new body");
+    });
+
+    it("preserves previous body when new body is empty string", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: { lint: { title: "Lint", status: "success", body: "keep this" } },
+        order: ["lint"],
+      };
+      const api = mockApi(makeExisting(state));
+      const inputs = defaultInputs({ section: "lint", status: "failure", body: "" });
+
+      await run(inputs, api);
+
+      const parsed = parseState((api.update as Mock).mock.calls[0][1] as string, "test");
+      expect(parsed?.sections.lint.body).toBe("keep this");
+      expect(parsed?.sections.lint.status).toBe("failure");
+    });
+
+    it("allows overwriting body with whitespace-only content", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: { lint: { title: "Lint", status: "success", body: "old" } },
+        order: ["lint"],
+      };
+      const api = mockApi(makeExisting(state));
+      const inputs = defaultInputs({ section: "lint", body: "   " });
+
+      await run(inputs, api);
+
+      const parsed = parseState((api.update as Mock).mock.calls[0][1] as string, "test");
+      expect(parsed?.sections.lint.body).toBe("   ");
+    });
+
+    it("handles section with same timestamp as existing (overwrites)", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: { x: { title: "X", status: "pending", body: "old", updatedAt: 5000 } },
+        order: ["x"],
+      };
+      const api = mockApi(makeExisting(state));
+      const inputs = defaultInputs({
+        section: "x",
+        status: "success",
+        body: "new",
+        timestamp: 5000,
+      });
+
+      await run(inputs, api);
+
+      const parsed = parseState((api.update as Mock).mock.calls[0][1] as string, "test");
+      expect(parsed?.sections.x.status).toBe("success");
+      expect(parsed?.sections.x.body).toBe("new");
     });
 
     it("truncates comments exceeding 65536 characters", async () => {

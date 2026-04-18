@@ -29,6 +29,38 @@ describe("encodeState / decodeState", () => {
     expect(decodeState(encodeState(state))).toEqual(state);
   });
 
+  it("handles markdown special characters in body", () => {
+    const state: State = {
+      ...sample,
+      sections: {
+        x: {
+          title: "X",
+          status: "success",
+          body: "| col1 | col2 |\n|------|------|\n| `code` | <b>bold</b> |\n```js\nfoo()\n```",
+        },
+      },
+    };
+    expect(decodeState(encodeState(state))).toEqual(state);
+  });
+
+  it("handles unicode and emoji in body", () => {
+    const state: State = {
+      ...sample,
+      sections: {
+        x: { title: "X", status: "success", body: "Pass \u2705 \uD83D\uDE80 caf\u00E9" },
+      },
+    };
+    expect(decodeState(encodeState(state))).toEqual(state);
+  });
+
+  it("preserves updatedAt timestamp", () => {
+    const state: State = {
+      ...sample,
+      sections: { x: { title: "X", status: "success", body: "ok", updatedAt: 1713470000000 } },
+    };
+    expect(decodeState(encodeState(state))).toEqual(state);
+  });
+
   it("returns null for corrupted base64", () => {
     expect(decodeState("not-valid!!!")).toBeNull();
   });

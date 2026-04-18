@@ -7,12 +7,11 @@ require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.MAX_RETRIES = exports.MAX_COMMENT_LENGTH = void 0;
 exports.run = run;
 const render_1 = __nccwpck_require__(7746);
 const state_1 = __nccwpck_require__(8578);
-exports.MAX_COMMENT_LENGTH = 65536;
-exports.MAX_RETRIES = 3;
+const MAX_COMMENT_LENGTH = 65536;
+const MAX_RETRIES = 3;
 const RETRY_MIN_MS = 1000;
 const RETRY_MAX_MS = 5000;
 function randomDelay() {
@@ -62,8 +61,8 @@ function buildState(existing, inputs) {
 }
 function renderBody(id, state) {
     let rendered = (0, render_1.render)(id, state);
-    if (rendered.length > exports.MAX_COMMENT_LENGTH) {
-        rendered = `${rendered.slice(0, exports.MAX_COMMENT_LENGTH - 60)}\n\n---\n*Comment truncated.*\n`;
+    if (rendered.length > MAX_COMMENT_LENGTH) {
+        rendered = `${rendered.slice(0, MAX_COMMENT_LENGTH - 60)}\n\n---\n*Comment truncated.*\n`;
     }
     return rendered;
 }
@@ -90,7 +89,7 @@ function verifyWrite(comment, inputs) {
 }
 async function run(inputs, api) {
     const marker = `<!-- sticky:${inputs.commentId} -->`;
-    for (let attempt = 0; attempt <= exports.MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         // Read current state
         const existing = await api.findByMarker(marker);
         // Build new state
@@ -108,7 +107,7 @@ async function run(inputs, api) {
         }
         // Verify our write stuck (skip verification if truncated or on last attempt)
         const wasTruncated = rendered.includes("*Comment truncated.*");
-        if (attempt < exports.MAX_RETRIES && inputs.section && !wasTruncated) {
+        if (attempt < MAX_RETRIES && inputs.section && !wasTruncated) {
             const verified = await api.findByMarker(marker);
             if (verified && verifyWrite(verified, inputs)) {
                 return result;

@@ -4,6 +4,8 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "esModuleInterop": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
