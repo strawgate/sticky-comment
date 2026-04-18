@@ -288,6 +288,110 @@ describe("run", () => {
     });
   });
 
+  describe("timestamp ordering", () => {
+    it("does not overwrite a section with a newer timestamp", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: {
+          build: { title: "Build", status: "success", body: "done", updatedAt: 2000 },
+        },
+        order: ["build"],
+      };
+      const api = mockApi(makeExisting(state));
+      // Our update has an OLDER timestamp
+      const inputs = defaultInputs({
+        section: "build",
+        title: "Build",
+        status: "pending",
+        body: "starting...",
+        timestamp: 1000,
+      });
+
+      await run(inputs, api);
+
+      const parsed = parseState((api.update as Mock).mock.calls[0][1] as string, "test");
+      // The newer "success" should be preserved, not overwritten by stale "pending"
+      expect(parsed?.sections.build.status).toBe("success");
+      expect(parsed?.sections.build.body).toBe("done");
+      expect(parsed?.sections.build.updatedAt).toBe(2000);
+    });
+
+    it("overwrites a section with an older timestamp", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: {
+          build: { title: "Build", status: "pending", body: "running", updatedAt: 1000 },
+        },
+        order: ["build"],
+      };
+      const api = mockApi(makeExisting(state));
+      const inputs = defaultInputs({
+        section: "build",
+        title: "Build",
+        status: "success",
+        body: "done!",
+        timestamp: 2000,
+      });
+
+      await run(inputs, api);
+
+      const parsed = parseState((api.update as Mock).mock.calls[0][1] as string, "test");
+      expect(parsed?.sections.build.status).toBe("success");
+      expect(parsed?.sections.build.body).toBe("done!");
+      expect(parsed?.sections.build.updatedAt).toBe(2000);
+    });
+
+    it("stops retrying when a newer writer overwrote our section", async () => {
+      // Existing state has no build section
+      const initialState: State = {
+        header: "",
+        style: "summary",
+        sections: {},
+        order: [],
+      };
+
+      // After our write, a NEWER writer overwrote with their own build status
+      const newerState: State = {
+        header: "",
+        style: "summary",
+        sections: {
+          build: { title: "Build", status: "success", body: "from newer", updatedAt: 3000 },
+        },
+        order: ["build"],
+      };
+      const newerBody = `<!-- sticky:test -->\n<!-- sticky:test:state:${encodeState(newerState)} -->`;
+
+      let writeCount = 0;
+      const api: CommentApi = {
+        findByMarker: vi.fn().mockImplementation(async () => {
+          if (writeCount === 0) return makeExisting(initialState);
+          // Verification: newer writer overwrote us
+          return { id: 42, body: newerBody, url: "https://github.com/test/42" };
+        }),
+        create: vi.fn(),
+        update: vi.fn().mockImplementation(async (id: number, body: string) => {
+          writeCount++;
+          return { id, body, url: `https://github.com/test/${id}` };
+        }),
+      };
+
+      const inputs = defaultInputs({
+        section: "build",
+        title: "Build",
+        status: "pending",
+        body: "starting",
+        timestamp: 1000, // older than the newer writer's 3000
+      });
+
+      await run(inputs, api);
+
+      // Should NOT retry — the newer write is correct, accept it
+      expect(api.update).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("edge cases", () => {
     it("falls back to section id when title is empty", async () => {
       const api = mockApi();

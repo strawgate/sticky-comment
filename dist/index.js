@@ -7,11 +7,12 @@ require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MAX_RETRIES = exports.MAX_COMMENT_LENGTH = void 0;
 exports.run = run;
 const render_1 = __nccwpck_require__(7746);
 const state_1 = __nccwpck_require__(8578);
-const MAX_COMMENT_LENGTH = 65536;
-const MAX_RETRIES = 3;
+exports.MAX_COMMENT_LENGTH = 65536;
+exports.MAX_RETRIES = 3;
 const RETRY_MIN_MS = 1000;
 const RETRY_MAX_MS = 5000;
 function randomDelay() {
@@ -38,17 +39,21 @@ function buildState(existing, inputs) {
     else {
         state = blank;
     }
-    // Upsert section
+    // Upsert section — only overwrite if our timestamp is newer
     if (inputs.section) {
         if (!state.order.includes(inputs.section)) {
             state.order.push(inputs.section);
         }
         const prev = state.sections[inputs.section];
-        state.sections[inputs.section] = {
-            title: inputs.title || prev?.title || inputs.section,
-            status: inputs.status || prev?.status || "",
-            body: inputs.body !== "" ? inputs.body : prev?.body || "",
-        };
+        const now = inputs.timestamp ?? Date.now();
+        if (!prev?.updatedAt || now >= prev.updatedAt) {
+            state.sections[inputs.section] = {
+                title: inputs.title || prev?.title || inputs.section,
+                status: inputs.status || prev?.status || "",
+                body: inputs.body !== "" ? inputs.body : prev?.body || "",
+                updatedAt: now,
+            };
+        }
     }
     else if (inputs.mode === "update") {
         return null; // nothing to change
@@ -57,8 +62,8 @@ function buildState(existing, inputs) {
 }
 function renderBody(id, state) {
     let rendered = (0, render_1.render)(id, state);
-    if (rendered.length > MAX_COMMENT_LENGTH) {
-        rendered = `${rendered.slice(0, MAX_COMMENT_LENGTH - 60)}\n\n---\n*Comment truncated.*\n`;
+    if (rendered.length > exports.MAX_COMMENT_LENGTH) {
+        rendered = `${rendered.slice(0, exports.MAX_COMMENT_LENGTH - 60)}\n\n---\n*Comment truncated.*\n`;
     }
     return rendered;
 }
@@ -70,7 +75,13 @@ function verifyWrite(comment, inputs) {
     if (!state?.sections[inputs.section])
         return false;
     const s = state.sections[inputs.section];
-    // Verify our values are present (status or body might inherit from prev, so just check what we set)
+    const ts = inputs.timestamp ?? 0;
+    // Our timestamp must match — if someone newer overwrote us, that's correct and we stop retrying
+    if (ts && s.updatedAt && s.updatedAt > ts)
+        return true; // newer update is fine
+    if (ts && s.updatedAt && s.updatedAt < ts)
+        return false; // our write was lost
+    // Check our values are present
     if (inputs.status && s.status !== inputs.status)
         return false;
     if (inputs.body && s.body !== inputs.body)
@@ -79,7 +90,7 @@ function verifyWrite(comment, inputs) {
 }
 async function run(inputs, api) {
     const marker = `<!-- sticky:${inputs.commentId} -->`;
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    for (let attempt = 0; attempt <= exports.MAX_RETRIES; attempt++) {
         // Read current state
         const existing = await api.findByMarker(marker);
         // Build new state
@@ -97,7 +108,7 @@ async function run(inputs, api) {
         }
         // Verify our write stuck (skip verification if truncated or on last attempt)
         const wasTruncated = rendered.includes("*Comment truncated.*");
-        if (attempt < MAX_RETRIES && inputs.section && !wasTruncated) {
+        if (attempt < exports.MAX_RETRIES && inputs.section && !wasTruncated) {
             const verified = await api.findByMarker(marker);
             if (verified && verifyWrite(verified, inputs)) {
                 return result;
@@ -227,6 +238,7 @@ async function main() {
         title: core.getInput("title") || section,
         status: core.getInput("status"),
         body,
+        timestamp: Date.now(),
     };
     const result = await (0, action_1.run)(inputs, api);
     if (result) {

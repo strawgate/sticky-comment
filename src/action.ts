@@ -23,10 +23,12 @@ export interface Inputs {
   title: string;
   status: string;
   body: string;
+  /** Unix timestamp (ms) captured once at action start; reused across retries. */
+  timestamp?: number;
 }
 
-const MAX_COMMENT_LENGTH = 65536;
-const MAX_RETRIES = 3;
+export const MAX_COMMENT_LENGTH = 65536;
+export const MAX_RETRIES = 3;
 const RETRY_MIN_MS = 1000;
 const RETRY_MAX_MS = 5000;
 
@@ -55,17 +57,21 @@ function buildState(existing: Comment | null, inputs: Inputs): State | null {
     state = blank;
   }
 
-  // Upsert section
+  // Upsert section — only overwrite if our timestamp is newer
   if (inputs.section) {
     if (!state.order.includes(inputs.section)) {
       state.order.push(inputs.section);
     }
     const prev = state.sections[inputs.section];
-    state.sections[inputs.section] = {
-      title: inputs.title || prev?.title || inputs.section,
-      status: inputs.status || prev?.status || "",
-      body: inputs.body !== "" ? inputs.body : prev?.body || "",
-    };
+    const now = inputs.timestamp ?? Date.now();
+    if (!prev?.updatedAt || now >= prev.updatedAt) {
+      state.sections[inputs.section] = {
+        title: inputs.title || prev?.title || inputs.section,
+        status: inputs.status || prev?.status || "",
+        body: inputs.body !== "" ? inputs.body : prev?.body || "",
+        updatedAt: now,
+      };
+    }
   } else if (inputs.mode === "update") {
     return null; // nothing to change
   }
@@ -87,7 +93,11 @@ function verifyWrite(comment: Comment, inputs: Inputs): boolean {
   const state = parseState(comment.body, inputs.commentId);
   if (!state?.sections[inputs.section]) return false;
   const s = state.sections[inputs.section];
-  // Verify our values are present (status or body might inherit from prev, so just check what we set)
+  const ts = inputs.timestamp ?? 0;
+  // Our timestamp must match — if someone newer overwrote us, that's correct and we stop retrying
+  if (ts && s.updatedAt && s.updatedAt > ts) return true; // newer update is fine
+  if (ts && s.updatedAt && s.updatedAt < ts) return false; // our write was lost
+  // Check our values are present
   if (inputs.status && s.status !== inputs.status) return false;
   if (inputs.body && s.body !== inputs.body) return false;
   return true;
