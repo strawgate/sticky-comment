@@ -1,10 +1,5 @@
 name: Sticky PR Comment
-description: >
-  Single sticky comment per PR with independently-updatable sections from
-  different jobs or workflows. Each section carries a status badge and
-  optional collapsible body. Three modes: 'init' creates the comment upfront
-  with explicit config; 'update' (default) upserts a section and auto-creates
-  the comment on first use; 'delete' removes a section or the entire comment.
+description: One sticky PR comment with sections updatable by multiple jobs. Status badges, collapsible details.
 
 branding:
   icon: message-square
