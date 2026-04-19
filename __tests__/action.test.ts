@@ -33,6 +33,9 @@ function mockApi(initial: { id: number; body: string; url: string } | null = nul
       current = { id, body, url: `https://github.com/test/${id}` };
       return { ...current };
     }),
+    delete: vi.fn().mockImplementation(async () => {
+      current = null;
+    }),
   };
 }
 
@@ -243,6 +246,7 @@ describe("run", () => {
           writeCount++;
           return { id, body, url: `https://github.com/test/${id}` };
         }),
+        delete: vi.fn(),
       };
 
       const inputs = defaultInputs({
@@ -375,6 +379,7 @@ describe("run", () => {
           writeCount++;
           return { id, body, url: `https://github.com/test/${id}` };
         }),
+        delete: vi.fn(),
       };
 
       const inputs = defaultInputs({
@@ -389,6 +394,93 @@ describe("run", () => {
 
       // Should NOT retry — the newer write is correct, accept it
       expect(api.update).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("delete mode", () => {
+    it("deletes the entire comment when no section specified", async () => {
+      const state: State = {
+        header: "CI",
+        style: "summary",
+        sections: { lint: { title: "Lint", status: "success", body: "ok" } },
+        order: ["lint"],
+      };
+      const api = mockApi(makeExisting(state));
+      const inputs = defaultInputs({ mode: "delete" });
+
+      const result = await run(inputs, api);
+
+      expect(api.delete).toHaveBeenCalledWith(42);
+      expect(result).toBeNull();
+    });
+
+    it("returns null when deleting a non-existent comment", async () => {
+      const api = mockApi();
+      const inputs = defaultInputs({ mode: "delete" });
+
+      const result = await run(inputs, api);
+
+      expect(api.delete).not.toHaveBeenCalled();
+      expect(result).toBeNull();
+    });
+
+    it("removes a single section and re-renders", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: {
+          lint: { title: "Lint", status: "success", body: "ok" },
+          test: { title: "Tests", status: "failure", body: "3 failed" },
+        },
+        order: ["lint", "test"],
+      };
+      const api = mockApi(makeExisting(state));
+      const inputs = defaultInputs({ mode: "delete", section: "lint" });
+
+      const result = await run(inputs, api);
+
+      expect(api.delete).not.toHaveBeenCalled();
+      expect(api.update).toHaveBeenCalledTimes(1);
+      const parsed = parseState(result?.body ?? "", "test");
+      expect(parsed?.sections.lint).toBeUndefined();
+      expect(parsed?.sections.test?.body).toBe("3 failed");
+      expect(parsed?.order).toEqual(["test"]);
+    });
+
+    it("deletes entire comment when removing the last section", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: { lint: { title: "Lint", status: "success", body: "ok" } },
+        order: ["lint"],
+      };
+      const api = mockApi(makeExisting(state));
+      const inputs = defaultInputs({ mode: "delete", section: "lint" });
+
+      const result = await run(inputs, api);
+
+      expect(api.delete).toHaveBeenCalledWith(42);
+      expect(result).toBeNull();
+    });
+
+    it("returns existing comment when deleting a non-existent section", async () => {
+      const state: State = {
+        header: "",
+        style: "summary",
+        sections: { lint: { title: "Lint", status: "success", body: "ok" } },
+        order: ["lint"],
+      };
+      const existing = makeExisting(state);
+      const api = mockApi(existing);
+      const inputs = defaultInputs({ mode: "delete", section: "nonexistent" });
+
+      const result = await run(inputs, api);
+
+      // Section doesn't exist, so state is unchanged — still updates to clean the render
+      expect(api.delete).not.toHaveBeenCalled();
+      expect(api.update).toHaveBeenCalledTimes(1);
+      const parsed = parseState(result?.body ?? "", "test");
+      expect(parsed?.sections.lint).toBeTruthy();
     });
   });
 

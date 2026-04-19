@@ -47,6 +47,14 @@ function buildApi(
       });
       return { id: data.id, body: data.body || "", url: data.html_url };
     },
+
+    async delete(id: number): Promise<void> {
+      await octokit.rest.issues.deleteComment({
+        owner,
+        repo,
+        comment_id: id,
+      });
+    },
   };
 }
 
@@ -77,7 +85,7 @@ async function main(): Promise<void> {
 
   const section = core.getInput("section");
   const inputs: Inputs = {
-    mode: (core.getInput("mode") || "update") as "init" | "update",
+    mode: (core.getInput("mode") || "update") as "init" | "update" | "delete",
     commentId: core.getInput("comment-id") || "sticky-comment",
     style: (core.getInput("style") || "summary") as Style,
     header: core.getInput("header"),

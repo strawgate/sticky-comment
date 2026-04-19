@@ -83,12 +83,31 @@ Skip init — the comment is created with defaults when the first section arrive
       Binary size: ${{ steps.build.outputs.size }}
 ```
 
+### Mode 3: Delete
+
+Remove a section, or the entire comment:
+
+```yaml
+# Remove one section
+- uses: strawgate/sticky-comment@v1
+  with:
+    mode: delete
+    section: deploy
+
+# Remove the entire comment
+- uses: strawgate/sticky-comment@v1
+  with:
+    mode: delete
+```
+
+If removing a section leaves zero sections, the comment is deleted automatically.
+
 ## Inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
 | `token` | `${{ github.token }}` | GitHub token for API access |
-| `mode` | `update` | `init` to create/configure, `update` to upsert a section |
+| `mode` | `update` | `init` to create/configure, `update` to upsert, `delete` to remove |
 | `comment-id` | `sticky-comment` | Logical name (allows multiple sticky comments per PR) |
 | `issue-number` | *(auto-detected)* | PR or issue number |
 | `header` | | Markdown heading at the top of the comment |

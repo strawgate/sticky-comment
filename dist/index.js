@@ -89,6 +89,30 @@ function verifyWrite(comment, inputs) {
 }
 async function run(inputs, api) {
     const marker = `<!-- sticky:${inputs.commentId} -->`;
+    // Delete mode
+    if (inputs.mode === "delete") {
+        const existing = await api.findByMarker(marker);
+        if (!existing)
+            return null;
+        if (!inputs.section) {
+            // Delete the entire comment
+            await api.delete(existing.id);
+            return null;
+        }
+        // Delete a single section
+        const state = (0, state_1.parseState)(existing.body, inputs.commentId);
+        if (!state)
+            return existing;
+        delete state.sections[inputs.section];
+        state.order = state.order.filter((k) => k !== inputs.section);
+        if (Object.keys(state.sections).length === 0) {
+            // No sections left — delete the whole comment
+            await api.delete(existing.id);
+            return null;
+        }
+        const rendered = renderBody(inputs.commentId, state);
+        return api.update(existing.id, rendered);
+    }
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         // Read current state
         const existing = await api.findByMarker(marker);
@@ -203,6 +227,13 @@ function buildApi(octokit, owner, repo, issueNumber) {
                 body,
             });
             return { id: data.id, body: data.body || "", url: data.html_url };
+        },
+        async delete(id) {
+            await octokit.rest.issues.deleteComment({
+                owner,
+                repo,
+                comment_id: id,
+            });
         },
     };
 }
